@@ -18,6 +18,8 @@ const path = require('path');
 const http = require('http');
 
 const DRY = process.argv.includes('--dry-run');
+const PURGE = process.argv.includes('--purge');
+const LIMIT = (function () { const i = process.argv.indexOf('--limit'); return i >= 0 ? parseInt(process.argv[i + 1], 10) || 0 : 0; })();
 const cfgPath = path.join(__dirname, 'config.json');
 if (!fs.existsSync(cfgPath)) {
   console.error('Missing config.json — copy config.sample.json to config.json and fill it in.');
@@ -134,9 +136,33 @@ async function upsertBatched(table, rows, size) {
   return done;
 }
 
+/* ---------- delete all Tally-sourced masters (cleanup) ---------- */
+function purgeTable(table) {
+  return new Promise(function (resolve, reject) {
+    const u = new URL(cfg.supabaseUrl + '/rest/v1/' + table + '?source=eq.tally');
+    const req = require('https').request({
+      hostname: u.hostname, path: u.pathname + u.search, method: 'DELETE',
+      headers: { 'apikey': cfg.serviceRoleKey, 'Authorization': 'Bearer ' + cfg.serviceRoleKey, 'Prefer': 'return=minimal' }
+    }, function (res) {
+      let d = ''; res.on('data', function (c) { d += c; });
+      res.on('end', function () {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve();
+        else reject(new Error(table + ' purge HTTP ' + res.statusCode + ': ' + d.slice(0, 200)));
+      });
+    });
+    req.on('error', reject); req.end();
+  });
+}
+
 /* ---------- main ---------- */
 (async function () {
   try {
+    if (PURGE) {
+      console.log('Purging all Tally-sourced masters from the Hub ...');
+      await purgeTable('items'); await purgeTable('customers');
+      console.log('Done ✓  Removed all items/parties with source = tally.');
+      return;
+    }
     console.log('Reading masters from Tally (' + (COMPANY || 'active company') + ') ...');
     const itemsXml = await tallyCollection('SO_Items', 'StockItem', 'NAME,BASEUNITS,GUID');
     const items = parseItems(itemsXml);
@@ -157,10 +183,15 @@ async function upsertBatched(table, rows, size) {
       console.error('config.json needs supabaseUrl and serviceRoleKey to write. (Use --dry-run to test reading.)');
       process.exit(1);
     }
+    let itemsToLoad = items, partiesToLoad = parties;
+    if (LIMIT > 0) {
+      itemsToLoad = items.slice(0, LIMIT); partiesToLoad = parties.slice(0, LIMIT);
+      console.log('--limit ' + LIMIT + ': loading only ' + itemsToLoad.length + ' items and ' + partiesToLoad.length + ' parties.');
+    }
     console.log('Writing to the Hub ...');
-    await upsertBatched('items', items, 500);
-    await upsertBatched('customers', parties, 500);
-    console.log('\nDone ✓  Synced ' + items.length + ' items and ' + parties.length + ' parties into the Hub.');
+    await upsertBatched('items', itemsToLoad, 500);
+    await upsertBatched('customers', partiesToLoad, 500);
+    console.log('\nDone ✓  Synced ' + itemsToLoad.length + ' items and ' + partiesToLoad.length + ' parties into the Hub.');
   } catch (e) {
     console.error('\nERROR: ' + e.message);
     process.exit(1);
