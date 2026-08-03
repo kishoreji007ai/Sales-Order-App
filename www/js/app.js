@@ -39,6 +39,14 @@
     return 'badge badge--' + String(status || 'Pending').toLowerCase();
   }
 
+  /* Rate for an item under a given price list; falls back to the item's base rate */
+  function resolveRate(item, plId) {
+    if (item && item.rates && plId && item.rates[plId] != null && item.rates[plId] !== '') {
+      return Number(item.rates[plId]) || 0;
+    }
+    return Number(item ? item.rate : 0) || 0;
+  }
+
   function lineAmount(l) { return (Number(l.qty) || 0) * (Number(l.rate) || 0); }
   function computeTotals(order) {
     var sub = 0, tax = 0;
@@ -63,6 +71,8 @@
     'order': renderOrderDetail,     // #order/<id>
     'item-edit': renderItemEdit,    // #item-edit/<id?>
     'cust-edit': renderCustEdit,    // #cust-edit/<id?>
+    'pricelists': renderPriceLists, // #pricelists
+    'pl-edit': renderPriceListEdit, // #pl-edit/<id?>
     'entry': renderEntry            // order entry (uses draft)
   };
 
@@ -80,7 +90,12 @@
   }
 
   function updateTabbar(name) {
-    var map = { orders: 'orders', items: 'items', customers: 'customers', entry: 'new' };
+    var map = {
+      orders: 'orders', order: 'orders',
+      items: 'items', 'item-edit': 'items', pricelists: 'items', 'pl-edit': 'items',
+      customers: 'customers', 'cust-edit': 'customers',
+      entry: 'new'
+    };
     var active = map[name];
     Array.prototype.forEach.call(tabbar.querySelectorAll('.tabbar__btn'), function (b) {
       b.classList.toggle('is-active', b.dataset.nav === active);
@@ -154,11 +169,13 @@
   /* Screen: Order entry (create / edit)                                */
   /* ------------------------------------------------------------------ */
   function startNewOrder() {
+    var pls = Store.priceLists();
     draft = {
       id: null,
       orderNo: Store.nextOrderNo(),
       date: Date.now(),
       customerId: '',
+      priceListId: pls.length ? pls[0].id : '',
       lines: [],
       notes: '',
       status: 'Pending'
@@ -197,6 +214,12 @@
           '<div class="field"><label>Order No.</label><input id="fOrderNo" value="' + esc(draft.orderNo) + '"></div>' +
           '<div class="field"><label>Date</label><input id="fDate" type="date" value="' + dateStr + '"></div>' +
         '</div>' +
+        (Store.priceLists().length ?
+          '<div class="field"><label>Price List</label><select id="fPriceList">' +
+            Store.priceLists().map(function (p) {
+              return '<option value="' + p.id + '" ' + (p.id === draft.priceListId ? 'selected' : '') + '>' + esc(p.name) + '</option>';
+            }).join('') +
+          '</select></div>' : '') +
       '</div>' +
 
       '<div class="sec-head"><h2>Items</h2>' +
@@ -219,6 +242,19 @@
 
     document.getElementById('pickCust').onclick = pickCustomer;
     document.getElementById('addItem').onclick = pickItem;
+    var plSel = document.getElementById('fPriceList');
+    if (plSel) plSel.onchange = function (e) {
+      draft.priceListId = e.target.value;
+      // re-price every line from the newly selected price list
+      draft.lines.forEach(function (l) {
+        var it = Store.item(l.itemId);
+        if (it) l.rate = resolveRate(it, draft.priceListId);
+      });
+      computeTotals(draft);
+      var pl = Store.priceList(draft.priceListId);
+      toast('Prices set to ' + (pl ? pl.name : 'list'));
+      renderEntry();
+    };
     document.getElementById('fOrderNo').oninput = function (e) { draft.orderNo = e.target.value; };
     document.getElementById('fDate').onchange = function (e) { draft.date = new Date(e.target.value).getTime() || draft.date; };
     document.getElementById('fNotes').oninput = function (e) { draft.notes = e.target.value; };
@@ -276,6 +312,8 @@
     if (!draft.lines.length) { toast('Add at least one item'); return; }
     var cust = Store.customer(draft.customerId);
     draft.customerName = cust ? cust.name : '';
+    var pl = Store.priceList(draft.priceListId);
+    draft.priceListName = pl ? pl.name : '';
     computeTotals(draft);
     var saved = Store.saveOrder(draft);
     toast('Order ' + saved.orderNo + ' saved');
@@ -342,7 +380,7 @@
       var existing = draft.lines.find(function (l) { return l.itemId === id; });
       if (existing) { existing.qty = (Number(existing.qty) || 0) + 1; }
       else {
-        draft.lines.push({ itemId: it.id, name: it.name, unit: it.unit, rate: it.rate, gst: it.gst, qty: 1 });
+        draft.lines.push({ itemId: it.id, name: it.name, unit: it.unit, rate: resolveRate(it, draft.priceListId), gst: it.gst, qty: 1 });
       }
       computeTotals(draft); renderEntry();
     }, { search: true });
@@ -372,6 +410,7 @@
         (cust.place ? '<div class="kv"><span class="k">Place</span><span>' + esc(cust.place) + '</span></div>' : '') +
         (cust.gstin ? '<div class="kv"><span class="k">GSTIN</span><span>' + esc(cust.gstin) + '</span></div>' : '') +
         '<div class="kv"><span class="k">Date</span><span>' + fmtDate(o.date) + '</span></div>' +
+        (o.priceListName ? '<div class="kv"><span class="k">Price List</span><span>' + esc(o.priceListName) + '</span></div>' : '') +
       '</div>' +
 
       '<div class="card">' + linesHtml +
@@ -413,7 +452,8 @@
     }).join('\n');
     return 'SALES ORDER ' + o.orderNo + '\n' +
       'Date: ' + fmtDate(o.date) + '\n' +
-      'Party: ' + cust.name + (cust.gstin ? ' (GSTIN ' + cust.gstin + ')' : '') + '\n\n' +
+      'Party: ' + cust.name + (cust.gstin ? ' (GSTIN ' + cust.gstin + ')' : '') + '\n' +
+      (o.priceListName ? 'Price List: ' + o.priceListName + '\n' : '') + '\n' +
       lines + '\n\n' +
       'Subtotal: ' + money(o.subtotal) + '\n' +
       'GST: ' + money(o.taxTotal) + '\n' +
@@ -446,7 +486,7 @@
       'table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:8px;border-bottom:1px solid #eee;font-size:13px;text-align:left}' +
       'th{background:#f3f5fa;color:#1b3a6b}.r{text-align:right}tfoot td{font-weight:bold;border-top:2px solid #1b3a6b}' +
       '.tot{text-align:right;margin-top:12px;font-size:15px}.grand{font-size:20px;color:#1b3a6b;font-weight:bold}</style></head><body>' +
-      '<h1>SALES ORDER</h1><div class="sub">' + esc(o.orderNo) + ' &middot; ' + fmtDate(o.date) + ' &middot; Status: ' + esc(o.status) + '</div>' +
+      '<h1>SALES ORDER</h1><div class="sub">' + esc(o.orderNo) + ' &middot; ' + fmtDate(o.date) + ' &middot; Status: ' + esc(o.status) + (o.priceListName ? ' &middot; ' + esc(o.priceListName) : '') + '</div>' +
       '<div class="box"><strong>' + esc(cust.name) + '</strong><br>' + esc(cust.address || cust.place || '') +
         (cust.gstin ? '<br>GSTIN: ' + esc(cust.gstin) : '') + (cust.phone ? '<br>Ph: ' + esc(cust.phone) : '') + '</div>' +
       '<table><thead><tr><th>#</th><th>Item</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">GST</th><th class="r">Amount</th></tr></thead>' +
@@ -467,6 +507,7 @@
     header('Stock Items', { action: '+ New', onAction: function () { go('item-edit'); } });
     var items = Store.items().filter(function (i) { return i.name.toLowerCase().indexOf(itemQuery.toLowerCase()) >= 0; });
     var html = '<div class="search"><input id="q" placeholder="Search items" value="' + esc(itemQuery) + '"></div>';
+    html += '<div style="text-align:right;margin:-4px 0 12px"><button class="btn btn--ghost btn--sm" id="mgPl">&#9881; Price Lists</button></div>';
     if (!items.length) html += emptyState('&#128230;', 'No items', 'Add stock items to use them in orders.');
     else html += '<div class="list">' + items.map(function (i) {
       return '<div class="row" data-item="' + i.id + '"><div class="row__main">' +
@@ -477,9 +518,55 @@
     view.innerHTML = html;
     var q = document.getElementById('q');
     q.oninput = function () { itemQuery = q.value; var p = q.selectionStart; renderItems(); var nq = document.getElementById('q'); nq.focus(); nq.setSelectionRange(p, p); };
+    document.getElementById('mgPl').onclick = function () { go('pricelists'); };
     Array.prototype.forEach.call(view.querySelectorAll('[data-item]'), function (r) {
       r.onclick = function () { go('item-edit/' + r.dataset.item); };
     });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Screen: Price Lists                                                */
+  /* ------------------------------------------------------------------ */
+  function renderPriceLists() {
+    header('Price Lists', { back: true, action: '+ New', onAction: function () { go('pl-edit'); } });
+    btnBack.onclick = function () { go('items'); };
+    var pls = Store.priceLists();
+    var html = '<div class="card"><div class="row__sub">Price lists let you keep different rate levels (e.g. Wholesale, Retail). Salesmen pick one when placing an order and item rates fill in automatically.</div></div>';
+    if (!pls.length) html += emptyState('&#127991;', 'No price lists', 'Add a price list, then set item rates for it.');
+    else html += '<div class="list">' + pls.map(function (p) {
+      return '<div class="row" data-pl="' + p.id + '"><div class="row__main">' +
+        '<div class="row__title">' + esc(p.name) + '</div></div>' +
+        '<div class="row__end muted">&rsaquo;</div></div>';
+    }).join('') + '</div>';
+    view.innerHTML = html;
+    Array.prototype.forEach.call(view.querySelectorAll('[data-pl]'), function (r) {
+      r.onclick = function () { go('pl-edit/' + r.dataset.pl); };
+    });
+  }
+
+  function renderPriceListEdit(id) {
+    var pl = id ? Store.priceList(id) : { name: '' };
+    if (!pl) { go('pricelists'); return; }
+    header(id ? 'Edit Price List' : 'New Price List', { back: true });
+    btnBack.onclick = function () { go('pricelists'); };
+    view.innerHTML =
+      '<div class="card">' +
+        '<div class="field"><label>Price list name</label><input id="name" value="' + esc(pl.name) + '" placeholder="e.g. Wholesale"></div>' +
+      '</div>' +
+      (id ? '<div class="card"><div class="row__sub">Set each item’s rate for this price list from the <strong>Items</strong> tab → open an item → <strong>Price List Rates</strong>.</div></div>' : '') +
+      '<button class="btn" id="save">Save Price List</button>' +
+      (id ? '<button class="btn btn--danger" id="del" style="margin-top:10px">Delete Price List</button>' : '');
+    document.getElementById('save').onclick = function () {
+      var name = document.getElementById('name').value.trim();
+      if (!name) { toast('Enter a name'); return; }
+      Store.savePriceList({ id: pl.id, name: name });
+      toast('Price list saved'); go('pricelists');
+    };
+    if (id) document.getElementById('del').onclick = function () {
+      if (confirm('Delete price list "' + pl.name + '"? Item rates for it will be removed.')) {
+        Store.deletePriceList(id); toast('Price list deleted'); go('pricelists');
+      }
+    };
   }
 
   function renderItemEdit(id) {
@@ -501,18 +588,35 @@
           '<div class="field"><label>HSN (optional)</label><input id="hsn" value="' + esc(it.hsn || '') + '"></div>' +
         '</div>' +
       '</div>' +
+      (Store.priceLists().length ?
+        '<div class="card">' +
+          '<div class="sec-head" style="margin-top:0"><h2>Price List Rates</h2></div>' +
+          '<div class="row__sub" style="margin:-6px 2px 10px">Leave blank to use the base rate above.</div>' +
+          Store.priceLists().map(function (p) {
+            var v = (it.rates && it.rates[p.id] != null) ? it.rates[p.id] : '';
+            return '<div class="field--row" style="align-items:center;margin-bottom:10px">' +
+              '<div style="flex:1;font-weight:600;font-size:14px">' + esc(p.name) + '</div>' +
+              '<div class="field" style="margin:0;flex:1"><input type="number" inputmode="decimal" data-pl="' + p.id + '" value="' + esc(v) + '" placeholder="₹ rate"></div>' +
+            '</div>';
+          }).join('') +
+        '</div>' : '') +
       '<button class="btn" id="save">Save Item</button>' +
       (id ? '<button class="btn btn--danger" id="del" style="margin-top:10px">Delete Item</button>' : '');
 
     document.getElementById('save').onclick = function () {
       var name = document.getElementById('name').value.trim();
       if (!name) { toast('Enter item name'); return; }
+      var rates = {};
+      Array.prototype.forEach.call(document.querySelectorAll('[data-pl]'), function (inp) {
+        if (inp.value !== '') rates[inp.dataset.pl] = Number(inp.value) || 0;
+      });
       Store.saveItem({
         id: it.id, name: name,
         unit: document.getElementById('unit').value.trim() || 'Pcs',
         rate: Number(document.getElementById('rate').value) || 0,
         gst: Number(document.getElementById('gst').value) || 0,
-        hsn: document.getElementById('hsn').value.trim()
+        hsn: document.getElementById('hsn').value.trim(),
+        rates: rates
       });
       toast('Item saved'); go('items');
     };
