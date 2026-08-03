@@ -2,3 +2,7 @@ node_modules/
 /android/
 .DS_Store
 *.log
+
+# Tally connector: local secrets & exports (never commit)
+tally-connector/config.json
+tally-connector/TallyExport_*/

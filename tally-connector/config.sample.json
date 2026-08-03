@@ -1,0 +1,6 @@
+{
+  "tallyUrl": "http://localhost:9000",
+  "company": "AQUA REGAL PRODUCTS-2026-2027",
+  "supabaseUrl": "https://odvieniztpkobnaiyzmu.supabase.co",
+  "serviceRoleKey": "PASTE_YOUR_SUPABASE_service_role_SECRET_KEY_HERE"
+}
