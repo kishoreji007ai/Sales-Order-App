@@ -71,6 +71,13 @@ function tallyCollection(id, type, fetchFields, extra) {
 }
 
 /* ---------- parse ---------- */
+function rates(block, head) {
+  // all GSTRATE values for a given duty head (IGST / CGST / SGST/UTGST), across history
+  const re = new RegExp('<GSTRATEDUTYHEAD>' + head.replace('/', '\\/') + '<\\/GSTRATEDUTYHEAD>[\\s\\S]*?<GSTRATE>\\s*([\\d.]+)', 'g');
+  const vals = []; let m;
+  while ((m = re.exec(block))) { const v = parseFloat(m[1]); if (v > 0) vals.push(v); }
+  return vals;
+}
 function parseItems(xml) {
   const out = [];
   const blocks = xml.split('<STOCKITEM ').slice(1);
@@ -79,7 +86,27 @@ function parseItems(xml) {
     const name = nm ? decode(nm[1]) : '';
     const guid = tag(b, 'GUID');
     const unit = tag(b, 'BASEUNITS') || 'NOS';
-    if (name && guid) out.push({ tally_guid: guid, name: name, unit: unit, source: 'tally' });
+    if (!name || !guid) return;
+    // HSN — first proper numeric code inside GST details
+    const hsnM = b.match(/<HSNCODE>\s*(\d{4,})\s*<\/HSNCODE>/);
+    const hsn = hsnM ? hsnM[1] : '';
+    // GST% — prefer IGST (the total); else CGST + SGST; take the highest across history
+    let gst = 0;
+    const ig = rates(b, 'IGST');
+    if (ig.length) gst = Math.max.apply(null, ig);
+    else {
+      const c = rates(b, 'CGST'), s = rates(b, 'SGST/UTGST');
+      if (c.length && s.length) gst = Math.max.apply(null, c) + Math.max.apply(null, s);
+      else {
+        // older pre-2017 encoding: per-head "State Tax" (often a fraction, e.g. 0.09 = 9%)
+        const st = rates(b, 'State Tax');
+        if (st.length) { let v = Math.max.apply(null, st); if (v < 1) v = v * 100; gst = Math.round(v * 2 * 100) / 100; }
+      }
+    }
+    // rate — numeric part of the opening/standard rate (e.g. "52.22/KGS")
+    const rM = b.match(/<OPENINGRATE[^>]*>\s*([\d.]+)/);
+    const rate = rM ? parseFloat(rM[1]) : 0;
+    out.push({ tally_guid: guid, name: name, unit: unit, gst: gst, hsn: hsn || null, base_rate: rate, source: 'tally' });
   });
   return out;
 }
@@ -90,12 +117,15 @@ function parseParties(xml) {
     const nm = b.match(/^NAME="([^"]*)"/);
     const name = nm ? decode(nm[1]) : '';
     const guid = tag(b, 'GUID');
-    const place = tag(b, 'PARENT');
+    const group = tag(b, 'PARENT');
     const phone = tag(b, 'LEDGERMOBILE');
     const state = tag(b, 'LEDSTATENAME');
-    let gstin = tag(b, 'PARTYGSTIN');
-    if (name && guid) out.push({ tally_guid: guid, name: name, place: place, phone: phone,
-      gstin: gstin || null, source: 'tally' });
+    const country = tag(b, 'COUNTRYNAME');
+    const gstin = tag(b, 'PARTYGSTIN');
+    if (name && guid) out.push({ tally_guid: guid, name: name,
+      place: state || group,           // shown as the party's location in the app
+      party_group: group || null, state: state || null, country: country || null,
+      phone: phone || null, gstin: gstin || null, source: 'tally' });
   });
   return out;
 }
@@ -164,11 +194,11 @@ function purgeTable(table) {
       return;
     }
     console.log('Reading masters from Tally (' + (COMPANY || 'active company') + ') ...');
-    const itemsXml = await tallyCollection('SO_Items', 'StockItem', 'NAME,BASEUNITS,GUID');
+    const itemsXml = await tallyCollection('SO_Items', 'StockItem', 'NAME,BASEUNITS,GUID,OPENINGRATE,GSTDETAILS');
     const items = parseItems(itemsXml);
     console.log('  stock items : ' + items.length);
 
-    const partyXml = await tallyCollection('SO_Parties', 'Ledger', 'NAME,GUID,PARENT,PARTYGSTIN,LEDGERMOBILE,LEDSTATENAME',
+    const partyXml = await tallyCollection('SO_Parties', 'Ledger', 'NAME,GUID,PARENT,PARTYGSTIN,LEDGERMOBILE,LEDSTATENAME,COUNTRYNAME',
       '<CHILDOF>Sundry Debtors</CHILDOF><BELONGSTO>Yes</BELONGSTO>');
     const parties = parseParties(partyXml);
     console.log('  parties     : ' + parties.length);
