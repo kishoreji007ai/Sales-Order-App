@@ -28,13 +28,23 @@
       { id: 'i8', name: 'Biscuits (Pack of 12)', unit: 'Box', rate: 180, gst: 18, hsn: '1905', rates: { pl1: 180, pl2: 174, pl3: 189 } }
     ],
     orders: [],
+    tallySettings: {
+      company: '',                 // blank = import into whatever company is open
+      salesLedger: 'Sales',        // must match a ledger name in Tally
+      voucherType: 'Sales Order',  // must match the Sales Order voucher type in Tally
+      godown: ''                   // optional location/godown name
+    },
     seq: 1
   };
 
   var db = load();
-  // Migration: older saved data may not have price lists
+  // Migration: older saved data may not have newer keys
   if (!db.priceLists) {
     db.priceLists = JSON.parse(JSON.stringify(SEED.priceLists));
+    persist();
+  }
+  if (!db.tallySettings) {
+    db.tallySettings = JSON.parse(JSON.stringify(SEED.tallySettings));
     persist();
   }
 
@@ -139,6 +149,12 @@
       db.orders = db.orders.filter(function (o) { return o.id !== id; });
       persist();
     },
+
+    /* ----- Tally export settings ----- */
+    tallySettings: function () {
+      return JSON.parse(JSON.stringify(db.tallySettings || SEED.tallySettings));
+    },
+    saveTallySettings: function (s) { db.tallySettings = s; persist(); return s; },
 
     resetDemo: function () {
       db = JSON.parse(JSON.stringify(SEED)); persist();

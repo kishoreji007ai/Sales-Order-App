@@ -33,6 +33,35 @@ Then open the printed `http://localhost:8791/` in a browser.
 
 ---
 
+## Use it as a desktop web app (GitHub Pages)
+
+After the first push, enable Pages once: repo **Settings → Pages → Build and
+deployment → Source = "GitHub Actions"**. The **Deploy Web App** workflow then
+publishes the app at:
+
+```
+https://kishoreji007ai.github.io/Sales-Order-App/
+```
+
+Open that URL in any desktop browser to place orders. (Each browser/device keeps
+its own on-device data.)
+
+## Export a Sales Order to TallyPrime (XML import)
+
+Every saved order has a **⬇ Download Tally XML (Sales Order)** button (order detail
+screen). It produces a TallyPrime-importable voucher file.
+
+1. In the app, open **Sales Orders → ⚙ Tally** (top-right) and set the names to
+   match your Tally: **Sales ledger**, **Sales Order voucher type**, optional
+   **Company** and **Godown**. Save.
+2. Open an order → **Download Tally XML** → you get `SO-0001.xml`.
+3. In TallyPrime: **Gateway of Tally → Import → Vouchers** (or Import Data →
+   Vouchers) → select the `.xml` file → Import. It creates a **Sales Order** voucher.
+
+> The party ledger and stock items named in the order must already exist in Tally
+> (or be created there). Names must match exactly. The first import is a quick test —
+> if Tally reports a mismatch, adjust the names in **⚙ Tally** settings and re-export.
+
 ## Build the installable Android APK
 
 This project uses [Capacitor](https://capacitorjs.com) to wrap the app into a real `.apk`.

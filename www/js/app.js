@@ -73,6 +73,7 @@
     'cust-edit': renderCustEdit,    // #cust-edit/<id?>
     'pricelists': renderPriceLists, // #pricelists
     'pl-edit': renderPriceListEdit, // #pl-edit/<id?>
+    'tally-settings': renderTallySettings, // #tally-settings
     'entry': renderEntry            // order entry (uses draft)
   };
 
@@ -91,7 +92,7 @@
 
   function updateTabbar(name) {
     var map = {
-      orders: 'orders', order: 'orders',
+      orders: 'orders', order: 'orders', 'tally-settings': 'orders',
       items: 'items', 'item-edit': 'items', pricelists: 'items', 'pl-edit': 'items',
       customers: 'customers', 'cust-edit': 'customers',
       entry: 'new'
@@ -126,7 +127,7 @@
   var orderFilter = 'All';
 
   function renderOrders() {
-    header('Sales Orders', {});
+    header('Sales Orders', { action: '⚙ Tally', onAction: function () { go('tally-settings'); } });
     var all = Store.orders();
     var filtered = orderFilter === 'All' ? all : all.filter(function (o) { return o.status === orderFilter; });
 
@@ -426,8 +427,9 @@
           return '<option ' + (s === o.status ? 'selected' : '') + '>' + s + '</option>';
         }).join('') + '</select></div>' +
 
+      '<button class="btn btn--accent" id="tallyXml" style="margin-bottom:10px">&#11015; Download Tally XML (Sales Order)</button>' +
       '<div class="btn-row" style="margin-bottom:10px">' +
-        '<button class="btn btn--accent" id="shareOrder">Share</button>' +
+        '<button class="btn btn--ghost" id="shareOrder">Share</button>' +
         '<button class="btn btn--ghost" id="printOrder">Print / PDF</button>' +
       '</div>' +
       '<div class="btn-row">' +
@@ -438,6 +440,7 @@
     document.getElementById('statusSel').onchange = function (e) {
       Store.setOrderStatus(o.id, e.target.value); toast('Status updated'); renderOrderDetail(o.id);
     };
+    document.getElementById('tallyXml').onclick = function () { downloadTallyXml(o, cust); };
     document.getElementById('shareOrder').onclick = function () { shareOrder(o, cust); };
     document.getElementById('printOrder').onclick = function () { printOrder(o, cust); };
     document.getElementById('editOrder').onclick = function () { editOrder(o.id); };
@@ -497,6 +500,118 @@
       (o.notes ? '<div class="box"><strong>Notes:</strong> ' + esc(o.notes) + '</div>' : '') +
       '<script>setTimeout(function(){window.print()},350)<\/script></body></html>');
     win.document.close();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Tally XML export (import file for TallyPrime)                       */
+  /* ------------------------------------------------------------------ */
+  function tallyDate(ts) {
+    var d = new Date(ts);
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate());
+  }
+
+  function buildTallyXml(o, cust) {
+    var s = Store.tallySettings();
+    var party = (cust && cust.name) || o.customerName || '';
+    var dt = tallyDate(o.date);
+
+    var inv = (o.lines || []).map(function (l) {
+      var qty = Number(l.qty) || 0;
+      var amt = (qty * (Number(l.rate) || 0)).toFixed(2);
+      var unit = l.unit || '';
+      var godown = s.godown ?
+        '<BATCHALLOCATIONS.LIST>' +
+          '<GODOWNNAME>' + esc(s.godown) + '</GODOWNNAME>' +
+          '<ACTUALQTY>' + qty + ' ' + esc(unit) + '</ACTUALQTY>' +
+          '<BILLEDQTY>' + qty + ' ' + esc(unit) + '</BILLEDQTY>' +
+          '<AMOUNT>' + amt + '</AMOUNT>' +
+        '</BATCHALLOCATIONS.LIST>' : '';
+      return '<ALLINVENTORYENTRIES.LIST>' +
+        '<STOCKITEMNAME>' + esc(l.name) + '</STOCKITEMNAME>' +
+        '<ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>' +
+        '<RATE>' + (Number(l.rate) || 0).toFixed(2) + '/' + esc(unit) + '</RATE>' +
+        '<ACTUALQTY>' + qty + ' ' + esc(unit) + '</ACTUALQTY>' +
+        '<BILLEDQTY>' + qty + ' ' + esc(unit) + '</BILLEDQTY>' +
+        '<AMOUNT>' + amt + '</AMOUNT>' +
+        godown +
+        '<ACCOUNTINGALLOCATIONS.LIST>' +
+          '<LEDGERNAME>' + esc(s.salesLedger) + '</LEDGERNAME>' +
+          '<ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>' +
+          '<AMOUNT>' + amt + '</AMOUNT>' +
+        '</ACCOUNTINGALLOCATIONS.LIST>' +
+      '</ALLINVENTORYENTRIES.LIST>';
+    }).join('');
+
+    var company = s.company ? '<SVCURRENTCOMPANY>' + esc(s.company) + '</SVCURRENTCOMPANY>' : '';
+
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<ENVELOPE>\n' +
+      ' <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>\n' +
+      ' <BODY>\n' +
+      '  <IMPORTDATA>\n' +
+      '   <REQUESTDESC>\n' +
+      '    <REPORTNAME>Vouchers</REPORTNAME>\n' +
+      '    <STATICVARIABLES>' + company + '</STATICVARIABLES>\n' +
+      '   </REQUESTDESC>\n' +
+      '   <REQUESTDATA>\n' +
+      '    <TALLYMESSAGE xmlns:UDF="TallyUDF">\n' +
+      '     <VOUCHER VCHTYPE="' + esc(s.voucherType) + '" ACTION="Create" OBJVIEW="Order Voucher View">\n' +
+      '      <DATE>' + dt + '</DATE>\n' +
+      '      <EFFECTIVEDATE>' + dt + '</EFFECTIVEDATE>\n' +
+      '      <VOUCHERTYPENAME>' + esc(s.voucherType) + '</VOUCHERTYPENAME>\n' +
+      '      <VOUCHERNUMBER>' + esc(o.orderNo) + '</VOUCHERNUMBER>\n' +
+      '      <REFERENCE>' + esc(o.orderNo) + '</REFERENCE>\n' +
+      '      <REFERENCEDATE>' + dt + '</REFERENCEDATE>\n' +
+      '      <PARTYLEDGERNAME>' + esc(party) + '</PARTYLEDGERNAME>\n' +
+      '      <BASICBASEPARTYNAME>' + esc(party) + '</BASICBASEPARTYNAME>\n' +
+      '      <PERSISTEDVIEW>Order Voucher View</PERSISTEDVIEW>\n' +
+      '      <ISDELETED>No</ISDELETED>\n' +
+      (o.notes ? '      <NARRATION>' + esc(o.notes) + '</NARRATION>\n' : '') +
+      '      ' + inv + '\n' +
+      '     </VOUCHER>\n' +
+      '    </TALLYMESSAGE>\n' +
+      '   </REQUESTDATA>\n' +
+      '  </IMPORTDATA>\n' +
+      ' </BODY>\n' +
+      '</ENVELOPE>\n';
+  }
+
+  function downloadTallyXml(o, cust) {
+    var xml = buildTallyXml(o, cust);
+    var blob = new Blob([xml], { type: 'application/xml' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (o.orderNo || 'sales-order') + '.xml';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 600);
+    toast('Tally XML downloaded');
+  }
+
+  function renderTallySettings() {
+    var s = Store.tallySettings();
+    header('Tally Export Settings', { back: true });
+    btnBack.onclick = function () { go('orders'); };
+    view.innerHTML =
+      '<div class="card"><div class="row__sub">These must match your TallyPrime company so the imported order posts correctly. Leave <strong>Company</strong> blank to import into whichever company is open in Tally.</div></div>' +
+      '<div class="card">' +
+        '<div class="field"><label>Company name in Tally (optional)</label><input id="tc" value="' + esc(s.company) + '" placeholder="Blank = use the open company"></div>' +
+        '<div class="field"><label>Sales ledger name</label><input id="tl" value="' + esc(s.salesLedger) + '" placeholder="e.g. Sales"></div>' +
+        '<div class="field"><label>Sales Order voucher type</label><input id="tv" value="' + esc(s.voucherType) + '" placeholder="Sales Order"></div>' +
+        '<div class="field"><label>Godown / Location (optional)</label><input id="tg" value="' + esc(s.godown) + '" placeholder="e.g. Main Location"></div>' +
+      '</div>' +
+      '<button class="btn" id="saveTs">Save Settings</button>';
+    document.getElementById('saveTs').onclick = function () {
+      Store.saveTallySettings({
+        company: document.getElementById('tc').value.trim(),
+        salesLedger: document.getElementById('tl').value.trim() || 'Sales',
+        voucherType: document.getElementById('tv').value.trim() || 'Sales Order',
+        godown: document.getElementById('tg').value.trim()
+      });
+      toast('Settings saved'); go('orders');
+    };
   }
 
   /* ------------------------------------------------------------------ */
