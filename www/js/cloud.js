@@ -23,7 +23,8 @@
   }
   function mapCustomer(row) {
     return { id: row.id, name: row.name, phone: row.phone || '', place: row.place || '',
-      gstin: row.gstin || '', address: row.address || '' };
+      gstin: row.gstin || '', address: row.address || '',
+      group: row.party_group || '', state: row.state || '', country: row.country || '' };
   }
   function mapOrder(row, lines) {
     return { id: row.id, orderNo: row.order_no,
@@ -65,7 +66,8 @@
   function uid() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('x' + Math.random().toString(36).slice(2) + Date.now().toString(36)); }
 
   async function pushCustomer(c) {
-    var r = await client.from('customers').upsert({ id: c.id, name: c.name, phone: c.phone, place: c.place, gstin: c.gstin, address: c.address });
+    var r = await client.from('customers').upsert({ id: c.id, name: c.name, phone: c.phone, place: c.place,
+      gstin: c.gstin, address: c.address, party_group: c.group || null, state: c.state || null, country: c.country || null });
     if (r.error) fail(r.error, 'Save party failed');
   }
   async function pushItem(it) {

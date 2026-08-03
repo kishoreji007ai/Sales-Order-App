@@ -779,7 +779,7 @@
   }
 
   function renderCustEdit(id) {
-    var c = id ? Store.customer(id) : { name: '', gstin: '', phone: '', place: '', address: '' };
+    var c = id ? Store.customer(id) : { name: '', gstin: '', phone: '', place: '', address: '', group: '', state: '', country: '' };
     if (!c) { go('customers'); return; }
     header(id ? 'Edit Party' : 'New Party', { back: true });
     btnBack.onclick = function () { go('customers'); };
@@ -790,7 +790,12 @@
           '<div class="field"><label>Phone</label><input id="phone" type="tel" value="' + esc(c.phone || '') + '"></div>' +
           '<div class="field"><label>Place</label><input id="place" value="' + esc(c.place || '') + '" placeholder="City, State"></div>' +
         '</div>' +
+        '<div class="field--row">' +
+          '<div class="field"><label>State</label><input id="state" value="' + esc(c.state || '') + '"></div>' +
+          '<div class="field"><label>Country</label><input id="country" value="' + esc(c.country || '') + '"></div>' +
+        '</div>' +
         '<div class="field"><label>GSTIN (optional)</label><input id="gstin" value="' + esc(c.gstin || '') + '"></div>' +
+        (c.group ? '<div class="field"><label>Tally Group</label><input value="' + esc(c.group) + '" disabled></div>' : '') +
         '<div class="field"><label>Address (optional)</label><textarea id="address" rows="2">' + esc(c.address || '') + '</textarea></div>' +
       '</div>' +
       '<button class="btn" id="save">Save Party</button>' +
@@ -803,8 +808,11 @@
         id: c.id, name: name,
         phone: document.getElementById('phone').value.trim(),
         place: document.getElementById('place').value.trim(),
+        state: document.getElementById('state').value.trim(),
+        country: document.getElementById('country').value.trim(),
         gstin: document.getElementById('gstin').value.trim(),
-        address: document.getElementById('address').value.trim()
+        address: document.getElementById('address').value.trim(),
+        group: c.group || ''
       });
       toast('Party saved'); go('customers');
     };
