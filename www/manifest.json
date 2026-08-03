@@ -1,0 +1,13 @@
+{
+  "name": "Sales Order",
+  "short_name": "SalesOrder",
+  "description": "Place sales orders directly from your mobile",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef1f6",
+  "theme_color": "#1b3a6b",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

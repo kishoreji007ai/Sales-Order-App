@@ -1,0 +1,20 @@
+{
+  "name": "mobile-sales-order",
+  "version": "1.0.0",
+  "description": "Standalone mobile app to place sales orders directly from a phone (TallyPrime-style).",
+  "private": true,
+  "scripts": {
+    "serve": "node server.js",
+    "add:android": "cap add android",
+    "sync": "cap sync android",
+    "open:android": "cap open android",
+    "build:apk": "cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "appId": "com.salesorder.mobile",
+  "appName": "Sales Order",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
