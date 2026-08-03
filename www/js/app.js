@@ -156,10 +156,12 @@
     var cust = Store.customer(o.customerId);
     var name = cust ? cust.name : (o.customerName || 'Unknown party');
     var count = (o.lines || []).length;
+    var showSalesman = (Store.isAdmin && Store.isAdmin()) && o.salesmanName;
     return '<div class="row" data-order="' + o.id + '">' +
       '<div class="row__main">' +
         '<div class="row__title">' + esc(name) + '</div>' +
         '<div class="row__sub">' + esc(o.orderNo) + ' &middot; ' + fmtDate(o.date) + ' &middot; ' + count + ' item' + (count === 1 ? '' : 's') + '</div>' +
+        (showSalesman ? '<div class="row__sub">👤 ' + esc(o.salesmanName) + '</div>' : '') +
         '<span class="' + badgeClass(o.status) + '">' + esc(o.status) + '</span>' +
       '</div>' +
       '<div class="row__end"><div class="row__amt">' + money(o.total) + '</div></div>' +
@@ -592,9 +594,16 @@
 
   function renderTallySettings() {
     var s = Store.tallySettings();
-    header('Tally Export Settings', { back: true });
+    var user = Store.currentUser ? Store.currentUser() : null;
+    header('Settings', { back: true });
     btnBack.onclick = function () { go('orders'); };
     view.innerHTML =
+      (user ? '<div class="card">' +
+        '<div class="kv"><span class="k">Signed in as</span><span class="strong">' + esc(user.email || '') + '</span></div>' +
+        '<div class="kv"><span class="k">Role</span><span>' + esc(user.role === 'admin' ? 'Admin' : 'Salesman') + '</span></div>' +
+        '<button class="btn btn--ghost" style="margin-top:12px" id="logoutBtn">Sign out</button>' +
+      '</div>' : '') +
+      '<div class="sec-head"><h2>Tally Export</h2></div>' +
       '<div class="card"><div class="row__sub">These must match your TallyPrime company so the imported order posts correctly. Leave <strong>Company</strong> blank to import into whichever company is open in Tally.</div></div>' +
       '<div class="card">' +
         '<div class="field"><label>Company name in Tally (optional)</label><input id="tc" value="' + esc(s.company) + '" placeholder="Blank = use the open company"></div>' +
@@ -612,6 +621,8 @@
       });
       toast('Settings saved'); go('orders');
     };
+    var lo = document.getElementById('logoutBtn');
+    if (lo) lo.onclick = function () { if (window.__logout) window.__logout(); };
   }
 
   /* ------------------------------------------------------------------ */
@@ -619,7 +630,8 @@
   /* ------------------------------------------------------------------ */
   var itemQuery = '';
   function renderItems() {
-    header('Stock Items', { action: '+ New', onAction: function () { go('item-edit'); } });
+    var admin = Store.isAdmin ? Store.isAdmin() : true;
+    header('Stock Items', admin ? { action: '+ New', onAction: function () { go('item-edit'); } } : {});
     var items = Store.items().filter(function (i) { return i.name.toLowerCase().indexOf(itemQuery.toLowerCase()) >= 0; });
     var html = '<div class="search"><input id="q" placeholder="Search items" value="' + esc(itemQuery) + '"></div>';
     html += '<div style="text-align:right;margin:-4px 0 12px"><button class="btn btn--ghost btn--sm" id="mgPl">&#9881; Price Lists</button></div>';
@@ -634,7 +646,7 @@
     var q = document.getElementById('q');
     q.oninput = function () { itemQuery = q.value; var p = q.selectionStart; renderItems(); var nq = document.getElementById('q'); nq.focus(); nq.setSelectionRange(p, p); };
     document.getElementById('mgPl').onclick = function () { go('pricelists'); };
-    Array.prototype.forEach.call(view.querySelectorAll('[data-item]'), function (r) {
+    if (admin) Array.prototype.forEach.call(view.querySelectorAll('[data-item]'), function (r) {
       r.onclick = function () { go('item-edit/' + r.dataset.item); };
     });
   }
@@ -643,7 +655,8 @@
   /* Screen: Price Lists                                                */
   /* ------------------------------------------------------------------ */
   function renderPriceLists() {
-    header('Price Lists', { back: true, action: '+ New', onAction: function () { go('pl-edit'); } });
+    var admin = Store.isAdmin ? Store.isAdmin() : true;
+    header('Price Lists', admin ? { back: true, action: '+ New', onAction: function () { go('pl-edit'); } } : { back: true });
     btnBack.onclick = function () { go('items'); };
     var pls = Store.priceLists();
     var html = '<div class="card"><div class="row__sub">Price lists let you keep different rate levels (e.g. Wholesale, Retail). Salesmen pick one when placing an order and item rates fill in automatically.</div></div>';
@@ -654,7 +667,7 @@
         '<div class="row__end muted">&rsaquo;</div></div>';
     }).join('') + '</div>';
     view.innerHTML = html;
-    Array.prototype.forEach.call(view.querySelectorAll('[data-pl]'), function (r) {
+    if (admin) Array.prototype.forEach.call(view.querySelectorAll('[data-pl]'), function (r) {
       r.onclick = function () { go('pl-edit/' + r.dataset.pl); };
     });
   }
@@ -745,7 +758,8 @@
   /* ------------------------------------------------------------------ */
   var custQuery = '';
   function renderCustomers() {
-    header('Parties', { action: '+ New', onAction: function () { go('cust-edit'); } });
+    var admin = Store.isAdmin ? Store.isAdmin() : true;
+    header('Parties', admin ? { action: '+ New', onAction: function () { go('cust-edit'); } } : {});
     var custs = Store.customers().filter(function (c) { return c.name.toLowerCase().indexOf(custQuery.toLowerCase()) >= 0; });
     var html = '<div class="search"><input id="q" placeholder="Search parties" value="' + esc(custQuery) + '"></div>';
     if (!custs.length) html += emptyState('&#128100;', 'No parties', 'Add customers to place orders for them.');
@@ -759,7 +773,7 @@
     view.innerHTML = html;
     var q = document.getElementById('q');
     q.oninput = function () { custQuery = q.value; var p = q.selectionStart; renderCustomers(); var nq = document.getElementById('q'); nq.focus(); nq.setSelectionRange(p, p); };
-    Array.prototype.forEach.call(view.querySelectorAll('[data-cust]'), function (r) {
+    if (admin) Array.prototype.forEach.call(view.querySelectorAll('[data-cust]'), function (r) {
       r.onclick = function () { go('cust-edit/' + r.dataset.cust); };
     });
   }
@@ -809,16 +823,23 @@
   /* ------------------------------------------------------------------ */
   /* Tab bar navigation                                                 */
   /* ------------------------------------------------------------------ */
-  Array.prototype.forEach.call(tabbar.querySelectorAll('.tabbar__btn'), function (b) {
-    b.onclick = function () {
-      var nav = b.dataset.nav;
-      if (nav === 'new') { startNewOrder(); }
-      else { go(nav); }
-    };
-  });
+  function boot() {
+    Array.prototype.forEach.call(tabbar.querySelectorAll('.tabbar__btn'), function (b) {
+      b.onclick = function () {
+        var nav = b.dataset.nav;
+        if (nav === 'new') { startNewOrder(); }
+        else { go(nav); }
+      };
+    });
+    btnBack.onclick = function () { window.history.length > 1 ? window.history.back() : go('orders'); };
+    window.addEventListener('hashchange', route);
+    route();
+  }
 
-  btnBack.onclick = function () { window.history.length > 1 ? window.history.back() : go('orders'); };
+  // Expose hooks for the cloud layer (cloud.js boots the app after login).
+  window.__APP_BOOT__ = boot;
+  window.__toast = toast;
 
-  window.addEventListener('hashchange', route);
-  route();
+  // If no cloud layer is present (standalone build), boot immediately.
+  if (!window.SUPA) boot();
 })();
