@@ -1,20 +1,19 @@
-/* Minimal offline cache so the PWA works with no network */
-var CACHE = 'sopro-v1';
-var ASSETS = [
-  './', './index.html', './manifest.json', './icon.svg',
-  './css/styles.css', './js/store.js', './js/app.js'
-];
-self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }).then(function () { return self.skipWaiting(); }));
-});
-self.addEventListener('activate', function (e) {
-  e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.map(function (k) { return k === CACHE ? null : caches.delete(k); }));
-  }).then(function () { return self.clients.claim(); }));
-});
-self.addEventListener('fetch', function (e) {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(caches.match(e.request).then(function (hit) {
-    return hit || fetch(e.request).catch(function () { return caches.match('./index.html'); });
-  }));
+/* Self-destroying service worker.
+   The old standalone app registered a caching SW that could keep serving stale
+   files. This version unregisters itself and clears all caches so every browser
+   loads the current Hub. It never caches anything. */
+self.addEventListener('install', function () { self.skipWaiting(); });
+
+self.addEventListener('activate', function (event) {
+  event.waitUntil((async function () {
+    try {
+      var keys = await caches.keys();
+      await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+    } catch (e) { /* ignore */ }
+    try { await self.registration.unregister(); } catch (e) { /* ignore */ }
+    try {
+      var clients = await self.clients.matchAll();
+      clients.forEach(function (c) { try { c.navigate(c.url); } catch (e) {} });
+    } catch (e) { /* ignore */ }
+  })());
 });

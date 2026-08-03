@@ -42,6 +42,19 @@
   <!-- Toast -->
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script>
+    /* One-time cleanup of the old standalone caching service worker */
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (rs) {
+        rs.forEach(function (r) {
+          if (r.active && r.active.scriptURL && r.active.scriptURL.indexOf('sw.js') >= 0) {
+            // load the self-destroying sw once so it clears caches, then it unregisters itself
+            navigator.serviceWorker.register('sw.js').catch(function () {});
+          }
+        });
+      });
+    }
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/supabase-config.js"></script>
   <script src="js/cloud.js"></script>
