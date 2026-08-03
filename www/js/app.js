@@ -47,6 +47,15 @@
     return Number(item ? item.rate : 0) || 0;
   }
 
+  /* Rate for an item on the CURRENT order: party's own rate wins, else price list, else base */
+  function orderLineRate(item) {
+    if (draft && draft.customerId && Store.partyPrice) {
+      var pp = Store.partyPrice(draft.customerId, item.id);
+      if (pp != null) return Number(pp) || 0;
+    }
+    return resolveRate(item, draft ? draft.priceListId : '');
+  }
+
   function lineAmount(l) { return (Number(l.qty) || 0) * (Number(l.rate) || 0); }
   function computeTotals(order) {
     var sub = 0, tax = 0;
@@ -71,6 +80,7 @@
     'order': renderOrderDetail,     // #order/<id>
     'item-edit': renderItemEdit,    // #item-edit/<id?>
     'cust-edit': renderCustEdit,    // #cust-edit/<id?>
+    'party-prices': renderPartyPrices, // #party-prices/<custId>
     'pricelists': renderPriceLists, // #pricelists
     'pl-edit': renderPriceListEdit, // #pl-edit/<id?>
     'tally-settings': renderTallySettings, // #tally-settings
@@ -94,7 +104,7 @@
     var map = {
       orders: 'orders', order: 'orders', 'tally-settings': 'orders',
       items: 'items', 'item-edit': 'items', pricelists: 'items', 'pl-edit': 'items',
-      customers: 'customers', 'cust-edit': 'customers',
+      customers: 'customers', 'cust-edit': 'customers', 'party-prices': 'customers',
       entry: 'new'
     };
     var active = map[name];
@@ -248,10 +258,10 @@
     var plSel = document.getElementById('fPriceList');
     if (plSel) plSel.onchange = function (e) {
       draft.priceListId = e.target.value;
-      // re-price every line from the newly selected price list
+      // re-price every line (party's own rate still wins over the list)
       draft.lines.forEach(function (l) {
         var it = Store.item(l.itemId);
-        if (it) l.rate = resolveRate(it, draft.priceListId);
+        if (it) l.rate = orderLineRate(it);
       });
       computeTotals(draft);
       var pl = Store.priceList(draft.priceListId);
@@ -371,13 +381,14 @@
     }), function (id) {
       draft.customerId = id;
       var cust = Store.customer(id);
-      if (cust && cust.priceListId) {
-        // apply the party's assigned price list and re-price existing lines
-        draft.priceListId = cust.priceListId;
-        draft.lines.forEach(function (l) { var it = Store.item(l.itemId); if (it) l.rate = resolveRate(it, draft.priceListId); });
-        computeTotals(draft);
-        var pl = Store.priceList(cust.priceListId);
-        if (pl) toast('Using ' + pl.name + ' prices for ' + cust.name);
+      if (cust && cust.priceListId) draft.priceListId = cust.priceListId;  // optional tier fallback
+      // re-price existing lines for this party (party's own rates win)
+      draft.lines.forEach(function (l) { var it = Store.item(l.itemId); if (it) l.rate = orderLineRate(it); });
+      computeTotals(draft);
+      if (cust) {
+        var hasOwn = Store.partyPricesFor && Object.keys(Store.partyPricesFor(id)).length;
+        if (hasOwn) toast('Using ' + cust.name + '’s own prices');
+        else if (cust.priceListId) { var pl = Store.priceList(cust.priceListId); if (pl) toast('Using ' + pl.name + ' prices for ' + cust.name); }
       }
       renderEntry();
     }, { search: true });
@@ -393,7 +404,7 @@
       var existing = draft.lines.find(function (l) { return l.itemId === id; });
       if (existing) { existing.qty = (Number(existing.qty) || 0) + 1; }
       else {
-        draft.lines.push({ itemId: it.id, name: it.name, unit: it.unit, rate: resolveRate(it, draft.priceListId), gst: it.gst, qty: 1 });
+        draft.lines.push({ itemId: it.id, name: it.name, unit: it.unit, rate: orderLineRate(it), gst: it.gst, qty: 1 });
       }
       computeTotals(draft); renderEntry();
     }, { search: true });
@@ -816,6 +827,7 @@
         '<div class="field"><label>Address (optional)</label><textarea id="address" rows="2">' + esc(c.address || '') + '</textarea></div>' +
       '</div>' +
       '<button class="btn" id="save">Save Party</button>' +
+      (id ? '<button class="btn btn--accent" id="setPrices" style="margin-top:10px">💲 Set this party’s item prices</button>' : '') +
       (id ? '<button class="btn btn--danger" id="del" style="margin-top:10px">Delete Party</button>' : '');
 
     document.getElementById('save').onclick = function () {
@@ -838,8 +850,54 @@
       });
       toast('Party saved'); go('customers');
     };
+    if (id) document.getElementById('setPrices').onclick = function () { go('party-prices/' + id); };
     if (id) document.getElementById('del').onclick = function () {
       if (confirm('Delete ' + c.name + '?')) { Store.deleteCustomer(id); toast('Party deleted'); go('customers'); }
+    };
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Screen: Party item prices (each party's own rates)                 */
+  /* ------------------------------------------------------------------ */
+  var ppState = null; // { custId, edits: {itemId: value}, query }
+  function renderPartyPrices(custId) {
+    var cust = Store.customer(custId);
+    if (!cust) { go('customers'); return; }
+    if (!ppState || ppState.custId !== custId) {
+      ppState = { custId: custId, edits: {}, query: '' };
+      var existing = Store.partyPricesFor(custId);
+      Object.keys(existing).forEach(function (k) { ppState.edits[k] = existing[k]; });
+    }
+    header('Prices · ' + cust.name, { back: true });
+    btnBack.onclick = function () { ppState = null; go('cust-edit/' + custId); };
+
+    var items = Store.items().filter(function (i) { return i.name.toLowerCase().indexOf(ppState.query.toLowerCase()) >= 0; });
+    var setCount = Object.keys(ppState.edits).filter(function (k) { return ppState.edits[k] !== '' && ppState.edits[k] != null; }).length;
+    var rows = items.map(function (it) {
+      var v = ppState.edits[it.id]; if (v == null) v = '';
+      return '<div style="display:flex;align-items:center;gap:10px;background:var(--card);border-radius:12px;box-shadow:var(--shadow);padding:10px 12px;margin-bottom:8px">' +
+        '<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">' + esc(it.name) + '</div>' +
+        '<div class="row__sub">' + esc(it.unit || '') + (it.gst ? ' · GST ' + it.gst + '%' : '') + '</div></div>' +
+        '<input class="pp-rate" data-item="' + it.id + '" type="number" inputmode="decimal" value="' + esc(v) + '" placeholder="₹' + (it.base_rate || 0) + '" ' +
+        'style="width:96px;text-align:right;border:1px solid var(--line);border-radius:9px;padding:9px;font-size:15px;background:#fff">' +
+      '</div>';
+    }).join('');
+
+    view.innerHTML =
+      '<div class="card"><div class="row__sub">Set <strong>' + esc(cust.name) + '</strong>’s own rate for each item. Blank = use the item’s base rate. These apply automatically when you place an order for this party. <strong>' + setCount + '</strong> set.</div></div>' +
+      '<div class="search"><input id="q" placeholder="Search items" value="' + esc(ppState.query) + '"></div>' +
+      '<div id="pplist">' + (rows || '<div class="card muted" style="text-align:center">No items</div>') + '</div>' +
+      '<div class="sticky-actions"><button class="btn" id="savePP">Save Prices</button></div>';
+
+    var q = document.getElementById('q');
+    q.oninput = function () { ppState.query = q.value; var p = q.selectionStart; renderPartyPrices(custId); var nq = document.getElementById('q'); nq.focus(); nq.setSelectionRange(p, p); };
+    Array.prototype.forEach.call(view.querySelectorAll('.pp-rate'), function (inp) {
+      inp.oninput = function () { ppState.edits[inp.dataset.item] = inp.value; };
+    });
+    document.getElementById('savePP').onclick = function () {
+      Store.setPartyPrices(custId, ppState.edits);
+      toast('Prices saved for ' + cust.name);
+      ppState = null; go('cust-edit/' + custId);
     };
   }
 

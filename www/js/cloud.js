@@ -6,7 +6,7 @@
   'use strict';
 
   var client = window.supabase.createClient(window.SUPA.url, window.SUPA.key);
-  var db = { customers: [], items: [], priceLists: [], orders: [] };
+  var db = { customers: [], items: [], priceLists: [], orders: [], partyPrices: {} };
   var me = null; // { id, email, name, role }
   var TKEY = 'sopro.tally.v1';
 
@@ -49,22 +49,30 @@
       client.from('item_prices').select('*'),
       client.from('customers').select('*').order('name'),
       client.from('orders').select('*').order('created_at', { ascending: false }),
-      client.from('order_lines').select('*')
+      client.from('order_lines').select('*'),
+      client.from('party_prices').select('*')
     ]);
     res.forEach(function (r) { if (r.error) console.error('load error', r.error); });
     var pl = res[0].data || [], it = res[1].data || [], ip = res[2].data || [],
-        cu = res[3].data || [], od = res[4].data || [], ol = res[5].data || [];
+        cu = res[3].data || [], od = res[4].data || [], ol = res[5].data || [], pp = res[6].data || [];
     db.priceLists = pl.map(function (r) { return { id: r.id, name: r.name }; });
     db.items = it.map(function (r) { return mapItem(r, ip); });
     db.customers = cu.map(mapCustomer);
     var byOrder = {};
     ol.forEach(function (l) { (byOrder[l.order_id] = byOrder[l.order_id] || []).push(l); });
     db.orders = od.map(function (r) { return mapOrder(r, byOrder[r.id] || []); });
+    db.partyPrices = {};
+    pp.forEach(function (r) { (db.partyPrices[r.customer_id] = db.partyPrices[r.customer_id] || {})[r.item_id] = Number(r.rate); });
   }
 
   /* ---------- background push helpers ---------- */
   function fail(e, msg) { console.error(msg, e); if (window.__toast) window.__toast(msg + (e && e.message ? ': ' + e.message : '')); }
   function uid() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('x' + Math.random().toString(36).slice(2) + Date.now().toString(36)); }
+
+  async function pushPartyPrices(custId, upserts, deletes) {
+    if (upserts.length) { var r = await client.from('party_prices').upsert(upserts, { onConflict: 'customer_id,item_id' }); if (r.error) fail(r.error, 'Save party prices failed'); }
+    if (deletes.length) { var r2 = await client.from('party_prices').delete().eq('customer_id', custId).in('item_id', deletes); if (r2.error) fail(r2.error, 'Remove party prices failed'); }
+  }
 
   async function pushCustomer(c) {
     var r = await client.from('customers').upsert({ id: c.id, name: c.name, phone: c.phone, place: c.place,
@@ -156,6 +164,20 @@
     deleteOrder: function (id) {
       db.orders = db.orders.filter(function (o) { return o.id !== id; });
       client.from('orders').delete().eq('id', id).then(function (r) { if (r.error) fail(r.error, 'Delete order failed'); });
+    },
+
+    /* ----- party-wise item rates ----- */
+    partyPrice: function (custId, itemId) { var m = db.partyPrices[custId]; return m ? m[itemId] : undefined; },
+    partyPricesFor: function (custId) { return Object.assign({}, db.partyPrices[custId] || {}); },
+    setPartyPrices: function (custId, map) {
+      db.partyPrices[custId] = db.partyPrices[custId] || {};
+      var ups = [], dels = [];
+      Object.keys(map).forEach(function (itemId) {
+        var v = map[itemId];
+        if (v === '' || v == null) { delete db.partyPrices[custId][itemId]; dels.push(itemId); }
+        else { var n = Number(v) || 0; db.partyPrices[custId][itemId] = n; ups.push({ customer_id: custId, item_id: itemId, rate: n }); }
+      });
+      pushPartyPrices(custId, ups, dels);
     },
 
     tallySettings: function () {
