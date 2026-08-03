@@ -367,9 +367,19 @@
     var custs = Store.customers();
     if (!custs.length) { toast('Add a customer first (Parties tab)'); return; }
     openSheet('Select Party', custs.map(function (c) {
-      return { id: c.id, label: c.name, sub: c.place || c.phone || '' };
+      return { id: c.id, label: c.name, sub: (c.place || c.phone || '') + (c.priceListName ? ' · ' + c.priceListName : '') };
     }), function (id) {
-      draft.customerId = id; renderEntry();
+      draft.customerId = id;
+      var cust = Store.customer(id);
+      if (cust && cust.priceListId) {
+        // apply the party's assigned price list and re-price existing lines
+        draft.priceListId = cust.priceListId;
+        draft.lines.forEach(function (l) { var it = Store.item(l.itemId); if (it) l.rate = resolveRate(it, draft.priceListId); });
+        computeTotals(draft);
+        var pl = Store.priceList(cust.priceListId);
+        if (pl) toast('Using ' + pl.name + ' prices for ' + cust.name);
+      }
+      renderEntry();
     }, { search: true });
   }
 
@@ -779,7 +789,7 @@
   }
 
   function renderCustEdit(id) {
-    var c = id ? Store.customer(id) : { name: '', gstin: '', phone: '', place: '', address: '', group: '', state: '', country: '' };
+    var c = id ? Store.customer(id) : { name: '', gstin: '', phone: '', place: '', address: '', group: '', state: '', country: '', priceListId: '', priceListName: '' };
     if (!c) { go('customers'); return; }
     header(id ? 'Edit Party' : 'New Party', { back: true });
     btnBack.onclick = function () { go('customers'); };
@@ -795,6 +805,13 @@
           '<div class="field"><label>Country</label><input id="country" value="' + esc(c.country || '') + '"></div>' +
         '</div>' +
         '<div class="field"><label>GSTIN (optional)</label><input id="gstin" value="' + esc(c.gstin || '') + '"></div>' +
+        (Store.priceLists().length ?
+          '<div class="field"><label>Price List (this party’s rates)</label><select id="plsel">' +
+            '<option value="">— default —</option>' +
+            Store.priceLists().map(function (p) {
+              return '<option value="' + p.id + '" ' + (p.id === c.priceListId ? 'selected' : '') + '>' + esc(p.name) + '</option>';
+            }).join('') +
+          '</select></div>' : '') +
         (c.group ? '<div class="field"><label>Tally Group</label><input value="' + esc(c.group) + '" disabled></div>' : '') +
         '<div class="field"><label>Address (optional)</label><textarea id="address" rows="2">' + esc(c.address || '') + '</textarea></div>' +
       '</div>' +
@@ -804,6 +821,9 @@
     document.getElementById('save').onclick = function () {
       var name = document.getElementById('name').value.trim();
       if (!name) { toast('Enter party name'); return; }
+      var plSelEl = document.getElementById('plsel');
+      var plId = plSelEl ? plSelEl.value : '';
+      var plObj = plId ? Store.priceList(plId) : null;
       Store.saveCustomer({
         id: c.id, name: name,
         phone: document.getElementById('phone').value.trim(),
@@ -812,7 +832,9 @@
         country: document.getElementById('country').value.trim(),
         gstin: document.getElementById('gstin').value.trim(),
         address: document.getElementById('address').value.trim(),
-        group: c.group || ''
+        group: c.group || '',
+        priceListId: plId,
+        priceListName: plObj ? plObj.name : ''
       });
       toast('Party saved'); go('customers');
     };

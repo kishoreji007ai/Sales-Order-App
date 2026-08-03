@@ -24,7 +24,8 @@
   function mapCustomer(row) {
     return { id: row.id, name: row.name, phone: row.phone || '', place: row.place || '',
       gstin: row.gstin || '', address: row.address || '',
-      group: row.party_group || '', state: row.state || '', country: row.country || '' };
+      group: row.party_group || '', state: row.state || '', country: row.country || '',
+      priceListId: row.price_list_id || '', priceListName: row.price_list_name || '' };
   }
   function mapOrder(row, lines) {
     return { id: row.id, orderNo: row.order_no,
@@ -67,7 +68,8 @@
 
   async function pushCustomer(c) {
     var r = await client.from('customers').upsert({ id: c.id, name: c.name, phone: c.phone, place: c.place,
-      gstin: c.gstin, address: c.address, party_group: c.group || null, state: c.state || null, country: c.country || null });
+      gstin: c.gstin, address: c.address, party_group: c.group || null, state: c.state || null, country: c.country || null,
+      price_list_id: c.priceListId || null, price_list_name: c.priceListName || null });
     if (r.error) fail(r.error, 'Save party failed');
   }
   async function pushItem(it) {
