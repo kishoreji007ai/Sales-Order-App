@@ -1,0 +1,34 @@
+name: Build Windows EXE
+
+# Builds a Windows installer (.exe) for the desktop app.
+# Download it from the run's Artifacts.
+on:
+  push:
+    branches: [ main, master ]
+    paths: [ 'www/**', 'desktop/**', '.github/workflows/build-exe.yml' ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: desktop
+
+      - name: Build installer
+        run: npm run dist
+        working-directory: desktop
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: sales-order-windows-exe
+          path: desktop/dist/*.exe

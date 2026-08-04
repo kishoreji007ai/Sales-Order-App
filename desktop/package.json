@@ -1,0 +1,32 @@
+{
+  "name": "sales-order-desktop",
+  "version": "1.0.0",
+  "description": "Sales Order — desktop app",
+  "main": "main.js",
+  "author": "Sales Order",
+  "private": true,
+  "scripts": {
+    "copy": "node copy-www.js",
+    "start": "npm run copy && electron .",
+    "dist": "npm run copy && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.salesorder.desktop",
+    "productName": "Sales Order",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "app/**/*"],
+    "win": { "target": "nsis" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sales Order"
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.7.6",
+    "electron-builder": "^24.13.3"
+  }
+}
